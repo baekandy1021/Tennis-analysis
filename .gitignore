@@ -1,0 +1,50 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# IDE and editor settings
+.vscode/
+.idea/
+*.swp
+
+# Environment variables
+.env
+
+# Kaggle or dataset files
+*.csv
+*.json
+*.zip
+data/
+datasets/
+
+# Model weights or large binaries
+*.pt
+*.onnx
+*.h5
+checkpoints/
+runs/
+
+# __pycache__ in notebooks
+*/.ipynb_checkpoints/
