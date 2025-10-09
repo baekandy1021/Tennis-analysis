@@ -1,5 +1,7 @@
 from ultralytics import YOLO # type: ignore
 
-model = YOLO('yolov8m')
+# model = YOLO('models/yolo5_best.pt')
+model = YOLO('yolov8l')
 
-model.predict('input_videos/input_video.mp4',save = True)
+result = model.track('input_videos/input_video.mp4',conf=0.2, save = True)
+
