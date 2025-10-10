@@ -43,6 +43,7 @@ datasets/
 *.pt
 *.onnx
 *.h5
+*.pth
 checkpoints/
 runs/
 
