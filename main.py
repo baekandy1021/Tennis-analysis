@@ -44,6 +44,12 @@ def main():
     #Draw Mini Court 
     output_video_frames = mini_court.draw_mini_court(output_video_frames)
     
+
+    # detect ball shots 
+    ball_shot_frames = ball_tracker.get_ball_shot_frames(ball_detections)
+
+
+
     ## Draw frame number on top left corner
     for i, frame in enumerate(output_video_frames):
         cv2.putText(frame, f"Frame: {i}", (10,30),cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0),2)
