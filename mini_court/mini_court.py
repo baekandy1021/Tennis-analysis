@@ -6,10 +6,10 @@ import constants
 from utils import (
     convert_meters_to_pixel_distance,
     convert_pixel_distance_to_meters,
-    # get_foot_position,
-    # get_closest_keypoint_index,
-    # get_height_of_bbox,
-    # measure_xy_distance,
+    get_foot_position,
+    get_closest_keypoint_index,
+    get_height_of_bbox,
+    measure_xy_distance,
     get_center_of_bbox,
     measure_distance
 )
@@ -154,24 +154,24 @@ class MiniCourt():
         return self.drawing_key_points
 
     def get_mini_court_coordinates(self,
-                                object_position,
-                                closest_key_point, 
-                                closest_key_point_index, 
-                                player_height_in_pixels,
-                                player_height_in_meters
-                                ):
+                                   object_position,
+                                   closest_key_point, 
+                                   closest_key_point_index, 
+                                   player_height_in_pixels,
+                                   player_height_in_meters
+                                   ):
         
         distance_from_keypoint_x_pixels, distance_from_keypoint_y_pixels = measure_xy_distance(object_position, closest_key_point)
 
         # Conver pixel distance to meters
         distance_from_keypoint_x_meters = convert_pixel_distance_to_meters(distance_from_keypoint_x_pixels,
-                                                                        player_height_in_meters,
-                                                                        player_height_in_pixels
-                                                                        )
+                                                                           player_height_in_meters,
+                                                                           player_height_in_pixels
+                                                                           )
         distance_from_keypoint_y_meters = convert_pixel_distance_to_meters(distance_from_keypoint_y_pixels,
                                                                                 player_height_in_meters,
                                                                                 player_height_in_pixels
-                                                                        )
+                                                                          )
         
         # Convert to mini court coordinates
         mini_court_x_distance_pixels = self.convert_meters_to_pixels(distance_from_keypoint_x_meters)
@@ -181,7 +181,7 @@ class MiniCourt():
                                         )
         
         mini_court_player_position = (closest_mini_coourt_keypoint[0]+mini_court_x_distance_pixels,
-                                    closest_mini_coourt_keypoint[1]+mini_court_y_distance_pixels
+                                      closest_mini_coourt_keypoint[1]+mini_court_y_distance_pixels
                                         )
 
         return  mini_court_player_position
@@ -207,7 +207,7 @@ class MiniCourt():
                 # Get The closest keypoint in pixels
                 closest_key_point_index = get_closest_keypoint_index(foot_position,original_court_key_points, [0,2,12,13])
                 closest_key_point = (original_court_key_points[closest_key_point_index*2], 
-                                    original_court_key_points[closest_key_point_index*2+1])
+                                     original_court_key_points[closest_key_point_index*2+1])
 
                 # Get Player height in pixels
                 frame_index_min = max(0, frame_num-20)
