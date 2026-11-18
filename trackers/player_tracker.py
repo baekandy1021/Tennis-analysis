@@ -8,7 +8,7 @@ import constants
 from utils import measure_distance, get_center_of_bbox, get_foot_position
 
 class PlayerTracker:
-    def choose_and_filter_players(self, court_keypoints, player_detections):
+    def choose_and_filter_players(self, court_keypoints_per_frame, player_detections):
         """Pick the 2 on-court players fresh each frame and relabel them to stable
         canonical IDs 1/2, instead of locking onto 2 of YOLO's persistent track IDs from
         frame 0. YOLO's tracker (persist=True) loses/reassigns IDs across occlusion and
@@ -18,9 +18,11 @@ class PlayerTracker:
         previous reference), which keeps identity stable without depending on tracker IDs."""
         filtered_player_detections = []
         prev_positions = {}
+        prev_chosen_ids = ()
 
-        for player_dict in player_detections:
-            chosen_ids = self.choose_players(court_keypoints, player_dict)
+        for court_keypoints, player_dict in zip(court_keypoints_per_frame, player_detections):
+            chosen_ids = self.choose_players(court_keypoints, player_dict, prev_chosen_ids)
+            prev_chosen_ids = chosen_ids
             candidates = {track_id: player_dict[track_id] for track_id in chosen_ids if track_id in player_dict}
 
             relabeled = {}
@@ -86,13 +88,26 @@ class PlayerTracker:
         foot = np.array([[get_foot_position(bbox)]], dtype=np.float32)
         return cv2.perspectiveTransform(foot, homography)[0][0]
 
-    def choose_players(self, court_keypoints, player_dict):
+    def expected_person_height_px(self, court_keypoints, court_x, court_y, height_m=1.8):
+        """Pixel height a standing person would have at this court spot, from the local
+        image scale (pixels per meter) around that point."""
+        homography = self._court_homography(court_keypoints)
+        ends = np.array([[[court_x - 0.5, court_y], [court_x + 0.5, court_y]]], dtype=np.float32)
+        p0, p1 = cv2.perspectiveTransform(ends, np.linalg.inv(homography))[0]
+        return height_m * float(np.linalg.norm(p1 - p0))
+
+    def choose_players(self, court_keypoints, player_dict, previous_ids=(), continuity_bonus=1.0):
         """Pick at most one player per side of the net, using foot positions mapped to
-        court meters. People outside the doubles width (+ margin) -- umpire, line judges,
-        net-side ball kids -- or too far behind a baseline (back-wall ball kids) are
-        dropped; on each side the person nearest the court's center line and closest to
-        the baseline area wins."""
+        court meters. People far outside the court -- umpire, line judges, back-wall ball
+        kids -- are dropped outright. The rest are scored per side (lower is better):
+          - meters outside the singles sidelines (net-side ball kids, line judges)
+          - meters behind the baseline (spectators at the bottom of the frame)
+          - box much shorter than a standing person at that spot (crouching ball kids,
+            spectators cut off by the frame edge)
+        Whoever was chosen last frame (same YOLO track ID) gets a continuity bonus, so a
+        ball kid running across after a point can't narrowly steal the slot."""
         width, length = self._W, self._L
+        singles_left, singles_right = self._A, self._A + self._S
         best = {}  # side -> (score, track_id)
         for track_id, bbox in player_dict.items():
             pos = self.court_position_meters(court_keypoints, bbox)
@@ -104,8 +119,12 @@ class PlayerTracker:
             if not (-self.max_behind_baseline_m <= y <= length + self.max_behind_baseline_m):
                 continue
             side = "far" if y < length / 2 else "near"
+            out_wide = max(0.0, singles_left - x, x - singles_right)
             behind = max(0.0, -y, y - length)
-            score = abs(x - width / 2) + 0.3 * behind
+            height_ratio = (bbox[3] - bbox[1]) / self.expected_person_height_px(court_keypoints, x, y)
+            score = out_wide + 0.5 * behind + 4.0 * max(0.0, 0.9 - height_ratio)
+            if track_id in previous_ids:
+                score -= continuity_bonus
             if side not in best or score < best[side][0]:
                 best[side] = (score, track_id)
         return [track_id for _, track_id in best.values()]

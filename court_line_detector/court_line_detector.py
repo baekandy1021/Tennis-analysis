@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as transforms
 import torchvision.models as models
 import cv2
+import numpy as np
 
 
 class CourtLineDetector:
@@ -46,9 +47,17 @@ class CourtLineDetector:
         return image
     
 
-    def draw_keypoints_on_video(self,video_frames,keypoints):
+    def predict_smoothed(self, frames, window=7):
+        """Per-frame keypoints for one continuous camera shot, smoothed with a rolling
+        median so they follow zooms/pans without single-frame jitter."""
+        predictions = np.stack([self.predict(frame) for frame in frames])
+        half = window // 2
+        return [np.median(predictions[max(0, i - half):i + half + 1], axis=0)
+                for i in range(len(predictions))]
+
+    def draw_keypoints_on_video(self, video_frames, keypoints_per_frame):
         output_video_frames = []
-        for frame in video_frames:
+        for frame, keypoints in zip(video_frames, keypoints_per_frame):
             frame = self.draw_keypoints(frame,keypoints)
             output_video_frames.append(frame)
         return output_video_frames

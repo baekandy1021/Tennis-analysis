@@ -163,13 +163,16 @@ class MiniCourt():
         transformed_point = cv2.perspectiveTransform(point_array, homography)[0][0]
         return (transformed_point[0], transformed_point[1])
 
-    def convert_bounding_boxes_to_mini_court_coordinates(self,player_boxes, ball_boxes, original_court_key_points ):
+    def convert_bounding_boxes_to_mini_court_coordinates(self, player_boxes, ball_boxes, court_keypoints_per_frame):
         output_player_boxes= []
         output_ball_boxes= []
-
-        homography = self.get_court_homography(original_court_key_points)
+        homographies = {}
 
         for frame_num, player_bbox in enumerate(player_boxes):
+            keypoints = court_keypoints_per_frame[frame_num]
+            if id(keypoints) not in homographies:
+                homographies[id(keypoints)] = self.get_court_homography(keypoints)
+            homography = homographies[id(keypoints)]
             ball_box = ball_boxes[frame_num][1]
             ball_position = get_center_of_bbox(ball_box)
 
