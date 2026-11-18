@@ -1,31 +1,38 @@
+import argparse
 from utils import read_video, save_video, get_video_fps
 from trackers import PlayerTracker, BallTracker
 from court_line_detector import CourtLineDetector
-from highlight_trimmer import PointClassifier, detect_court_visible_frames
+from editor.export import read_cuts
 from mini_court import MiniCourt
 import cv2
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Player/ball tracking + mini court on a clip.")
+    parser.add_argument("input", nargs="?", default="input_videos/input_video1.mp4")
+    parser.add_argument("--cuts", help="Rally cut list from `python -m editor.cli` -- only analyze those spans")
+    args = parser.parse_args()
+
     # Read video
-    input_video_path = "input_videos/input_video1.mp4"
+    input_video_path = args.input
     video_frames = read_video(input_video_path)
+    fps = get_video_fps(input_video_path)
 
     # Court Line Detector model
     court_model_path = "models/keypoints_model.pth"
     court_line_detector = CourtLineDetector(court_model_path)
     court_keypoints = court_line_detector.predict(video_frames[0])
 
-    # Stage 1: keep only frames where the full court is actually visible
-    classifier = PointClassifier(court_line_detector, reference_frame=video_frames[0])
-    court_visible = detect_court_visible_frames(video_frames, classifier,
-                                                stub_path="tracker_stubs/court_visible.pkl",
-                                                read_from_stub=False)
-
-    kept_indices = [i for i, visible in enumerate(court_visible) if visible]
-    print(f"Kept {len(kept_indices)}/{len(video_frames)} frames with the court visible.")
+    # Stage 1: restrict to rally segments from the editor's cut list (or the whole clip)
+    if args.cuts:
+        segments = read_cuts(args.cuts)
+        kept_indices = [i for i in range(len(video_frames))
+                        if any(s <= i / fps < e for s, e, _ in segments)]
+    else:
+        kept_indices = list(range(len(video_frames)))
+    print(f"Analyzing {len(kept_indices)}/{len(video_frames)} frames.")
     if not kept_indices:
-        print("No court-visible frames found, nothing to write.")
+        print("No frames to analyze.")
         return
 
     court_frames = [video_frames[i] for i in kept_indices]
@@ -70,7 +77,6 @@ def main():
     for i, frame in enumerate(output_video_frames):
         cv2.putText(frame, f"Frame: {kept_indices[i]}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    fps = get_video_fps(input_video_path)
     save_video(output_video_frames, "output_videos/output_video.avi", fps=fps)
 
 if __name__ == "__main__":

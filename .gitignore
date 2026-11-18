@@ -49,3 +49,10 @@ runs/
 
 # __pycache__ in notebooks
 */.ipynb_checkpoints/
+# Generated media and caches
+input_videos/*.mp4
+input_videos/*.mov
+output_videos/
+tracker_stubs/
+editor_cache/
+labels/

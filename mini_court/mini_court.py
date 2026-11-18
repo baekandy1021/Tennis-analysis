@@ -5,7 +5,6 @@ sys.path.append('../')
 import constants
 from utils import (
     convert_meters_to_pixel_distance,
-    convert_pixel_distance_to_meters,
     get_foot_position,
     get_center_of_bbox,
 )
