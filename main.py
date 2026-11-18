@@ -1,5 +1,5 @@
 import argparse
-from utils import read_video, save_video, get_video_fps
+from utils import iter_frames, save_video, get_video_fps
 from trackers import PlayerTracker, BallTracker
 from court_line_detector import CourtLineDetector
 from editor.export import read_cuts
@@ -13,29 +13,24 @@ def main():
     parser.add_argument("--cuts", help="Rally cut list from `python -m editor.cli` -- only analyze those spans")
     args = parser.parse_args()
 
-    # Read video
+    # Read only the frames we'll analyze: rally segments from the editor's cut list, or the whole clip
     input_video_path = args.input
-    video_frames = read_video(input_video_path)
     fps = get_video_fps(input_video_path)
-
-    # Court Line Detector model
-    court_model_path = "models/keypoints_model.pth"
-    court_line_detector = CourtLineDetector(court_model_path)
-    court_keypoints = court_line_detector.predict(video_frames[0])
-
-    # Stage 1: restrict to rally segments from the editor's cut list (or the whole clip)
-    if args.cuts:
-        segments = read_cuts(args.cuts)
-        kept_indices = [i for i in range(len(video_frames))
-                        if any(s <= i / fps < e for s, e, _ in segments)]
-    else:
-        kept_indices = list(range(len(video_frames)))
-    print(f"Analyzing {len(kept_indices)}/{len(video_frames)} frames.")
-    if not kept_indices:
+    segments = read_cuts(args.cuts) if args.cuts else None
+    kept_indices, court_frames = [], []
+    for frame_idx, t, frame in iter_frames(input_video_path):
+        if segments is None or any(s <= t < e for s, e, _ in segments):
+            kept_indices.append(frame_idx)
+            court_frames.append(frame)
+    print(f"Analyzing {len(court_frames)} frames.")
+    if not court_frames:
         print("No frames to analyze.")
         return
 
-    court_frames = [video_frames[i] for i in kept_indices]
+    # Court Line Detector model (keypoints from the first analyzed frame, which is a court view)
+    court_model_path = "models/keypoints_model.pth"
+    court_line_detector = CourtLineDetector(court_model_path)
+    court_keypoints = court_line_detector.predict(court_frames[0])
 
     # Stage 2: run player + ball detection only on the retained frames
     player_tracker = PlayerTracker(model_path='yolov8l')
@@ -54,7 +49,7 @@ def main():
     player_detections = player_tracker.choose_and_filter_players(court_keypoints, player_detections)
 
     # MiniCourt
-    mini_court = MiniCourt(video_frames[0])
+    mini_court = MiniCourt(court_frames[0])
 
     # Convert positions to mini court positions
     player_mini_court_detections, ball_mini_court_detections = mini_court.convert_bounding_boxes_to_mini_court_coordinates(player_detections,

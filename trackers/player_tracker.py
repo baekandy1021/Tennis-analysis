@@ -8,9 +8,6 @@ import constants
 from utils import measure_distance, get_center_of_bbox, get_foot_position
 
 class PlayerTracker:
-    def __init__(self,model_path):
-        self.model = YOLO(model_path)
-
     def choose_and_filter_players(self, court_keypoints, player_detections):
         """Pick the 2 on-court players fresh each frame and relabel them to stable
         canonical IDs 1/2, instead of locking onto 2 of YOLO's persistent track IDs from
@@ -57,57 +54,61 @@ class PlayerTracker:
 
         return filtered_player_detections
 
-    def choose_players(self,court_keypoints, player_dict):
-        """Pick up to 2 track IDs most likely to be the actual players, not ball boys/
-        spectators. First restricts to detections whose foot position falls inside the
-        court boundary (with a small margin for players stepping just outside the lines
-        chasing a shot) -- ball kids stand along the fence outside this boundary. Falls
-        back to the full detection set if fewer than 2 pass that filter (e.g. both players
-        briefly stepped out of frame), then ranks by nearest court keypoint as before."""
-        if not player_dict:
-            return []
+    # Real-world positions (meters) of the 14 court keypoints, same order as the
+    # keypoint model / mini court: x across the doubles width, y from the far baseline.
+    _W, _L = constants.DOUBLE_LINE_WIDTH, constants.HALF_COURT_LINE_HEIGHT * 2
+    _A, _S, _N = constants.DOUBLE_ALLY_DIFFERENCE, constants.SINGLE_LINE_WIDTH, constants.NO_MANS_LAND_HEIGHT
+    COURT_KEYPOINTS_METERS = np.array([
+        (0, 0), (_W, 0), (0, _L), (_W, _L),                    # doubles corners
+        (_A, 0), (_A, _L), (_A + _S, 0), (_A + _S, _L),        # singles corners
+        (_A, _N), (_A + _S, _N), (_A, _L - _N), (_A + _S, _L - _N),  # service line ends
+        (_W / 2, _N), (_W / 2, _L - _N),                       # center service line ends
+    ], dtype=np.float32)
 
-        on_court = self._filter_on_court(court_keypoints, player_dict)
-        candidates = on_court if len(on_court) >= 2 else player_dict
+    def __init__(self, model_path, side_margin_m=1.5, max_behind_baseline_m=6.0):
+        self.model = YOLO(model_path)
+        self.side_margin_m = side_margin_m
+        self.max_behind_baseline_m = max_behind_baseline_m
+        self._homography_cache = (None, None)
 
-        distances = []
-        for track_id, bbox in candidates.items():
-            player_center = get_center_of_bbox(bbox)
+    def _court_homography(self, court_keypoints):
+        key = tuple(np.round(np.asarray(court_keypoints, dtype=np.float32), 1))
+        if self._homography_cache[0] != key:
+            image_points = np.asarray(court_keypoints, dtype=np.float32).reshape(-1, 2)
+            homography, _ = cv2.findHomography(image_points, self.COURT_KEYPOINTS_METERS, cv2.RANSAC)
+            self._homography_cache = (key, homography)
+        return self._homography_cache[1]
 
-            min_distance = float('inf')
-            for i in range(0, len(court_keypoints),2):
-                court_keypoint = (court_keypoints[i],court_keypoints[i+1])
-                distance = measure_distance(player_center, court_keypoint)
-                if distance < min_distance:
-                    min_distance= distance
-            distances.append((track_id, min_distance))
+    def court_position_meters(self, court_keypoints, bbox):
+        homography = self._court_homography(court_keypoints)
+        if homography is None:
+            return None
+        foot = np.array([[get_foot_position(bbox)]], dtype=np.float32)
+        return cv2.perspectiveTransform(foot, homography)[0][0]
 
-        distances.sort(key = lambda x: x[1])
-
-        return [track_id for track_id, _ in distances[:2]]
-
-    def _filter_on_court(self, court_keypoints, player_dict):
-        court_polygon = np.array([
-            (court_keypoints[0], court_keypoints[1]),  # top-left
-            (court_keypoints[2], court_keypoints[3]),  # top-right
-            (court_keypoints[6], court_keypoints[7]),  # bottom-right
-            (court_keypoints[4], court_keypoints[5]),  # bottom-left
-        ], dtype=np.float32).reshape(-1, 1, 2)
-
-        top_width = measure_distance((court_keypoints[0], court_keypoints[1]), (court_keypoints[2], court_keypoints[3]))
-        bottom_width = measure_distance((court_keypoints[4], court_keypoints[5]), (court_keypoints[6], court_keypoints[7]))
-        margin_pixels = (2.0 / constants.DOUBLE_LINE_WIDTH) * ((top_width + bottom_width) / 2)
-
-        on_court = {}
+    def choose_players(self, court_keypoints, player_dict):
+        """Pick at most one player per side of the net, using foot positions mapped to
+        court meters. People outside the doubles width (+ margin) -- umpire, line judges,
+        net-side ball kids -- or too far behind a baseline (back-wall ball kids) are
+        dropped; on each side the person nearest the court's center line and closest to
+        the baseline area wins."""
+        width, length = self._W, self._L
+        best = {}  # side -> (score, track_id)
         for track_id, bbox in player_dict.items():
-            foot_position = get_foot_position(bbox)
-            distance_to_court = cv2.pointPolygonTest(court_polygon, foot_position, True)
-            if distance_to_court >= -margin_pixels:
-                on_court[track_id] = bbox
-
-        return on_court
-    
-
+            pos = self.court_position_meters(court_keypoints, bbox)
+            if pos is None:
+                continue
+            x, y = float(pos[0]), float(pos[1])
+            if not (-self.side_margin_m <= x <= width + self.side_margin_m):
+                continue
+            if not (-self.max_behind_baseline_m <= y <= length + self.max_behind_baseline_m):
+                continue
+            side = "far" if y < length / 2 else "near"
+            behind = max(0.0, -y, y - length)
+            score = abs(x - width / 2) + 0.3 * behind
+            if side not in best or score < best[side][0]:
+                best[side] = (score, track_id)
+        return [track_id for _, track_id in best.values()]
 
     def detect_frames(self, frames,read_from_stub=False, stub_path=None):
         player_detections = []
